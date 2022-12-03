@@ -1,24 +1,12 @@
 // Package pulseaudio is a pure-Go (no libpulse) implementation of the PulseAudio native protocol.
 //
-// Rather than exposing the PulseAudio protocol directly this library attempts to hide
-// the PulseAudio complexity behind a Go interface.
-// Some of the things which are deliberately not exposed in the API are:
-//
-// → backwards compatibility for old PulseAudio servers
-//
-// → transport mechanism used for the connection (Unix sockets / memfd / shm)
-//
-// → encoding used in the pulseaudio-native protocol
-//
-// Working features
-//
-// Querying and setting the volume.
-//
-// Listing audio outputs.
-//
-// Changing the default audio output.
-//
-// Notifications on config updates.
+// Package pulseaudio is a pure-Go (no libpulse) implementation of the PulseAudio native protocol.
+
+// This library is a fork of https://github.com/mafik/pulseaudio
+// The original library deliberately tries to hide pulseaudio internals and doesn't expose them.
+
+// For my usecase I needed the exact opposite, access to pulseaudio internals.
+
 package pulseaudio
 
 import (
@@ -27,15 +15,15 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
 	"os/user"
 	"path"
+	"path/filepath"
 )
 
 const version = 32
-
-var defaultAddr = fmt.Sprintf("/run/user/%d/pulse/native", os.Getuid())
 
 type packetResponse struct {
 	buff *bytes.Buffer
@@ -62,12 +50,17 @@ type Client struct {
 	clientIndex int
 	packets     chan packet
 	updates     chan struct{}
+	connected   bool
 }
 
 // NewClient establishes a connection to the PulseAudio server.
 func NewClient(addressArr ...string) (*Client, error) {
 	if len(addressArr) < 1 {
-		addressArr = []string{defaultAddr}
+		rtp, err := RuntimePath("native")
+		if err != nil {
+			return nil, err
+		}
+		addressArr = []string{rtp}
 	}
 
 	conn, err := net.Dial("unix", addressArr[0])
@@ -76,9 +69,10 @@ func NewClient(addressArr ...string) (*Client, error) {
 	}
 
 	c := &Client{
-		conn:    conn,
-		packets: make(chan packet),
-		updates: make(chan struct{}, 1),
+		conn:      conn,
+		packets:   make(chan packet),
+		updates:   make(chan struct{}, 1),
+		connected: true,
 	}
 
 	go c.processPackets()
@@ -171,10 +165,12 @@ loop:
 			}
 			var tag uint32
 			var rsp command
+			//var typ uint32
 			err = bread(buff, uint32Tag, &rsp, uint32Tag, &tag)
 			if err != nil {
 				// We've got a weird request from PulseAudio - that should never happen.
 				// We could ignore it and continue but it may hide some errors so let's panic.
+				log.Println(err)
 				panic(err)
 			}
 			if rsp == commandSubscribeEvent && tag == 0xffffffff {
@@ -214,7 +210,10 @@ loop:
 			}
 		}
 	}
+	// end of packet processing loop, e.g. disconnected
+	c.connected = false
 	for _, p := range pending {
+
 		p.responseChan <- packetResponse{
 			buff: nil,
 			err:  fmt.Errorf("PulseAudio client was closed"),
@@ -264,7 +263,10 @@ func (c *Client) addPacket(data packet) (err error) {
 
 func (c *Client) auth() error {
 	const protocolVersionMask = 0x0000FFFF
-	cookiePath := os.Getenv("HOME") + "/.config/pulse/cookie"
+	cookiePath, err := cookiePath()
+	if err != nil {
+		return err
+	}
 	cookie, err := ioutil.ReadFile(cookiePath)
 	if err != nil {
 		return err
@@ -323,4 +325,79 @@ func (c *Client) setName() error {
 func (c *Client) Close() {
 	close(c.packets)
 	c.conn.Close()
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return false
+}
+
+// Connected returns a bool specifying if the connection to pulse is alive
+func (c *Client) Connected() bool {
+	return c != nil && c.connected
+}
+
+// RuntimePath resolves a file in the pulse runtime path
+// E.g. pass "native" to get the address for pulse' native socket
+// Original implementation: https://github.com/pulseaudio/pulseaudio/blob/6c58c69bb6b937c1e758410d3114fc3bc0606fbe/src/pulsecore/core-util.c
+// Except we do not support legacy $HOME paths
+func RuntimePath(fn string) (string, error) {
+
+	if rtp := os.Getenv("PULSE_RUNTIME_PATH"); rtp != "" {
+		return filepath.Join(rtp, fn), nil
+	}
+
+	if xdgdir := os.Getenv("XDG_RUNTIME_DIR"); xdgdir != "" {
+		if exists(xdgdir) {
+			return filepath.Join(xdgdir, "/pulse/", fn), nil
+		}
+	}
+
+	defaultxdg := fmt.Sprintf("/run/user/%d", os.Getuid())
+	if exists(defaultxdg) {
+		return filepath.Join(defaultxdg, "/pulse/", fn), nil
+	}
+
+	return "", fmt.Errorf("No valid directory for Pulse RuntimePath found")
+}
+
+func cookiePath() (string, error) {
+
+	p := filepath.Join(os.Getenv("PULSE_COOKIE"))
+	if exists(p) {
+		return p, nil
+	}
+
+	if confHome := os.Getenv("XDG_CONFIG_HOME"); confHome != "" {
+		cookie := filepath.Join(confHome, "/pulse/cookie")
+		if exists(cookie) {
+			return cookie, nil
+		}
+	}
+
+	p = filepath.Join(os.Getenv("HOME"), "/.config/pulse/cookie")
+	if exists(p) {
+		return p, nil
+	}
+
+	p = filepath.Join(os.Getenv("HOME"), "/.pulse-cookie")
+	if exists(p) {
+		return p, nil
+	}
+
+	return "", fmt.Errorf("No valid path for Pulse cookie found")
+}
+
+type Device interface {
+	SetVolume(volume float32) error
+	SetMute (b bool) error
+	ToggleMute() error
+	IsMute() bool
+	GetVolume() float32
 }
