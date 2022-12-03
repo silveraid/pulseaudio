@@ -22,6 +22,8 @@ Some of the things which are deliberately not exposed in the API are:
 
 → encoding used in the pulseaudio-native protocol
 
+→ wors with pipewire as long as pipewire-pulse is installed and running
+
 ## Working features
 Querying and setting the volume.
 
