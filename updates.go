@@ -1,35 +1,135 @@
 package pulseaudio
 
-type DevType int
-
-const (
-	SUBSCRIPTION_MASK_ALL DevType = 0x02ff
-	SUBSCRIPTION_MASK_AUTOLOAD = 0x0100
-	SUBSCRIPTION_MASK_CARD = 0x0200
-	SUBSCRIPTION_MASK_CLIENT = 0x0020
-	SUBSCRIPTION_MASK_MODULE = 0x0010
-	SUBSCRIPTION_MASK_NULL = 0x0000
-	SUBSCRIPTION_MASK_SAMPLE_CACHE = 0x0040
-	SUBSCRIPTION_MASK_SERVER = 0x0080
-	SUBSCRIPTION_MASK_SINK = 0x0001
-	SUBSCRIPTION_MASK_SINK_INPUT = 0x0004
-	SUBSCRIPTION_MASK_SOURCE = 0x0002
-	SUBSCRIPTION_MASK_SOURCE_OUTPUT = 0x0008
+import (
+	goErrors "errors"
+	"fmt"
+	"strings"
 )
 
-// Updates returns a channel with PulseAudio updates.
-func (c *Client) Updates() (updates <-chan struct{}, err error) {
-	_, err = c.request(commandSubscribe, uint32Tag, uint32(SUBSCRIPTION_MASK_ALL))
-	if err != nil {
-		return nil, err
+type SubscriptionMask uint32
+
+const (
+	SubscriptionMaskSink         SubscriptionMask = 0x0001
+	SubscriptionMaskSource       SubscriptionMask = 0x0002
+	SubscriptionMaskSinkInput    SubscriptionMask = 0x0004
+	SubscriptionMaskSourceOutput SubscriptionMask = 0x0008
+	SubscriptionMaskModule       SubscriptionMask = 0x0010
+	SubscriptionMaskClient       SubscriptionMask = 0x0020
+	SubscriptionMaskSampleCache  SubscriptionMask = 0x0040
+	SubscriptionMaskServer       SubscriptionMask = 0x0080
+	SubscriptionMaskCard         SubscriptionMask = 0x0200
+	SubscriptionMaskAll          SubscriptionMask = 0x02ff
+)
+
+func StrToSubscriptionMask(s string) (SubscriptionMask, error) {
+	var mask SubscriptionMask
+	parts := strings.Split(s, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(strings.ToLower(part))
+		switch part {
+		case "sink":
+			mask |= SubscriptionMaskSink
+		case "source":
+			mask |= SubscriptionMaskSource
+		case "sinkinput":
+			mask |= SubscriptionMaskSinkInput
+		case "sourceoutput":
+			mask |= SubscriptionMaskSourceOutput
+		case "module":
+			mask |= SubscriptionMaskModule
+		case "client":
+			mask |= SubscriptionMaskClient
+		case "samplecache":
+			mask |= SubscriptionMaskSampleCache
+		case "server":
+			mask |= SubscriptionMaskServer
+		case "card":
+			mask |= SubscriptionMaskCard
+		case "all":
+			mask |= SubscriptionMaskAll
+		default:
+			return 0, goErrors.New("unknown SubscriptionMask: " + part)
+		}
 	}
-	return c.updates, nil
+	return mask, nil
 }
 
+// ////////////////////////////////////////////////////////
+type SubscriptionEventFacility uint32
 
+const (
+	FacilitySink         SubscriptionEventFacility = 0
+	FacilitySource       SubscriptionEventFacility = 1
+	FacilitySinkInput    SubscriptionEventFacility = 2
+	FacilitySourceOutput SubscriptionEventFacility = 3
+	FacilityModule       SubscriptionEventFacility = 4
+	FacilityClient       SubscriptionEventFacility = 5
+	FacilitySampleCache  SubscriptionEventFacility = 6
+	FacilityServer       SubscriptionEventFacility = 7
+	FacilityAutoload     SubscriptionEventFacility = 8
+	FacilityCard         SubscriptionEventFacility = 9
+)
 
-func (c *Client) UpdatesByType(devType DevType) (updates <-chan struct{}, err error) {
-	_, err = c.request(commandSubscribe, uint32Tag, uint32(devType))
+func (f SubscriptionEventFacility) String() string {
+	switch f {
+	case FacilitySink:
+		return "Sink"
+	case FacilitySource:
+		return "Source"
+	case FacilitySinkInput:
+		return "SinkInput"
+	case FacilitySourceOutput:
+		return "SourceOutput"
+	case FacilityModule:
+		return "Module"
+	case FacilityClient:
+		return "Client"
+	case FacilitySampleCache:
+		return "SampleCache"
+	case FacilityServer:
+		return "Server"
+	case FacilityAutoload:
+		return "Autoload"
+	case FacilityCard:
+		return "Card"
+	default:
+		return fmt.Sprintf("UnknownFacility(%d)", f)
+	}
+}
+
+// ////////////////////////////////////////////////////////
+type SubscriptionEventType uint32
+
+const (
+	EventTypeNew     SubscriptionEventType = 0x00
+	EventTypeChanged SubscriptionEventType = 0x10
+	EventTypeRemoved SubscriptionEventType = 0x20
+)
+
+func (t SubscriptionEventType) String() string {
+	switch t {
+	case EventTypeNew:
+		return "New"
+	case EventTypeChanged:
+		return "Changed"
+	case EventTypeRemoved:
+		return "Removed"
+	default:
+		return fmt.Sprintf("UnknownType(%d)", t)
+	}
+}
+
+type SubscriptionEvent struct {
+	EventFacility string
+	EventType     string
+	Index         *uint32
+}
+
+// ////////////////////////////////////////////////////////
+
+// Updates returns a channel with PulseAudio updates.
+func (c *Client) Updates(mask SubscriptionMask) (updates <-chan SubscriptionEvent, err error) {
+	_, err = c.request(commandSubscribe, uint32Tag, uint32(mask))
 	if err != nil {
 		return nil, err
 	}
