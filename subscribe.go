@@ -127,11 +127,17 @@ type SubscriptionEvent struct {
 
 // ////////////////////////////////////////////////////////
 
-// Updates returns a channel with PulseAudio updates.
-func (c *Client) Updates(mask SubscriptionMask) (updates <-chan SubscriptionEvent, err error) {
-	_, err = c.request(commandSubscribe, uint32Tag, uint32(mask))
+// Deprecated. Use Subscribe() and read client.Events
+func (c *Client) Updates() (updates <-chan SubscriptionEvent, err error) {
+	_, err = c.request(commandSubscribe, uint32Tag, uint32(SubscriptionMaskAll))
 	if err != nil {
 		return nil, err
 	}
-	return c.updates, nil
+	return c.Events, nil
+}
+
+// All events will be sent to client.Updates channel
+func (c *Client) Subscribe(mask SubscriptionMask) (err error) {
+	_, err = c.request(commandSubscribe, uint32Tag, uint32(mask))
+	return err
 }

@@ -49,7 +49,7 @@ type Client struct {
 	conn        net.Conn
 	clientIndex int
 	packets     chan packet
-	updates     chan SubscriptionEvent
+	Events      chan SubscriptionEvent
 	connected   bool
 }
 
@@ -71,7 +71,7 @@ func NewClient(addressArr ...string) (*Client, error) {
 	c := &Client{
 		conn:      conn,
 		packets:   make(chan packet),
-		updates:   make(chan SubscriptionEvent),
+		Events:    make(chan SubscriptionEvent),
 		connected: true,
 	}
 
@@ -184,7 +184,7 @@ loop:
 				s.EventFacility = SubscriptionEventFacility(raw & 0x0F).String()
 				s.EventType = SubscriptionEventType(raw & 0x30).String()
 				select {
-				case c.updates <- s:
+				case c.Events <- s:
 				default:
 				}
 				continue
