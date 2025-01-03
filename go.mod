@@ -1,3 +1,3 @@
-module github.com/the-jonsey/pulseaudio
+module github.com/silveraid/pulseaudio
 
-go 1.19
+go 1.23
